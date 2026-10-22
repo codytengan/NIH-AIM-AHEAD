@@ -1,0 +1,153 @@
+---
+title: "Teds-d"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+library(tidyverse)
+library(scales)
+library(usmap)
+load("tedsd_puf_2024.rdata")
+data <- TEDSD_PUF_2024
+```
+
+You can add options to executable code like this
+
+```{r}
+# Clean up (-9 = missing)
+df <- df %>%
+  filter(DAYWAIT != -9) %>%
+  mutate(
+    wait = factor(DAYWAIT, levels = 0:4,
+                  labels = c("0 days", "1-7", "8-14", "15-30", "31+")),
+    prior = ifelse(NOPRIOR == 0, "First treatment", "Repeat"),
+    long_wait = DAYWAIT >= 2
+  )
+
+# 1. First vs. repeat treatment
+df %>%
+  filter(NOPRIOR %in% c(0, 1)) %>%
+  ggplot(aes(prior)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "First vs. repeat treatment", x = NULL, y = "Count")
+
+# 2. Days waited overall
+ggplot(df, aes(wait)) +
+  geom_bar(fill = "steelblue") +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "Days waited to enter treatment", x = "Days waited", y = "Count")
+
+# 2a. Days waited by state (% waiting 8+ days)
+df %>%
+  group_by(STFIPS) %>%
+  summarise(pct_long = mean(long_wait)) %>%
+  ggplot(aes(reorder(factor(STFIPS), pct_long), pct_long)) +
+  geom_col(fill = "firebrick") +
+  coord_flip() +
+  labs(title = "Share waiting 8+ days, by state (FIPS code)", x = "State", y = "Share")
+```
+
+```{r}
+df <- df %>%
+  filter(FRSTUSE1 != -9, NOPRIOR %in% c(0, 1)) %>%
+  mutate(
+    first_use = factor(FRSTUSE1, levels = 1:7,
+                       labels = c("11 or under", "12-14", "15-17", "18-20",
+                                  "21-24", "25-29", "30+")),
+    prior = ifelse(NOPRIOR == 0, "First treatment", "Repeat treatment")
+  )
+
+# Side-by-side: share of each group by age at first use
+df %>%
+  count(prior, first_use) %>%
+  group_by(prior) %>%
+  mutate(pct = n / sum(n)) %>%
+  ggplot(aes(first_use, pct, fill = prior)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Age at first use by treatment history",
+       x = "Age at first use", y = "Share of patients", fill = NULL)
+
+# Alternative: share of patients in repeat treatment, by age at first use
+df %>%
+  group_by(first_use) %>%
+  summarise(pct_repeat = mean(NOPRIOR == 1)) %>%
+  ggplot(aes(first_use, pct_repeat)) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Share in repeat treatment, by age at first use",
+       x = "Age at first use", y = "% repeat treatment")
+```
+
+```{r}
+library(tidyverse)
+
+load("tedsd_puf_2024.rdata")
+df <- TEDSD_PUF_2024   # change to the name ls() shows
+
+df <- df %>% filter(DAYWAIT != -9)
+
+# Labels (check against the codebook)
+age_lab  <- c("12-14","15-17","18-20","21-24","25-29","30-34",
+              "35-39","40-44","45-49","50-54","55-64","65+")
+eth_lab  <- c("Puerto Rican","Mexican","Other Hispanic","Not Hispanic")
+ins_lab  <- c("Private","Medicaid","Medicare","Other","None")
+sub_lab  <- c("Alcohol","Cocaine","Marijuana","Heroin","Other opiates","Meth")
+sex_lab  <- c("Male","Female")
+
+plot_df <- df %>%
+  transmute(
+    long_wait = DAYWAIT >= 2,
+    Age       = as.character(factor(AGE, 1:12, age_lab)),
+    Gender    = as.character(factor(SEX, 1:2, sex_lab)),
+    Ethnicity = as.character(factor(ETHNIC, 1:4, eth_lab)),
+    Insurance = as.character(factor(HLTHINS, 1:5, ins_lab)),
+    Substance = as.character(factor(SUB1, c(2,3,4,5,6,9), sub_lab))
+  ) %>%
+  pivot_longer(-long_wait, names_to = "descriptor", values_to = "group") %>%
+  filter(!is.na(group)) %>%
+  group_by(descriptor, group) %>%
+  summarise(pct = mean(long_wait), n = n(), .groups = "drop") %>%
+  mutate(group = factor(group, levels = unique(c(age_lab, sex_lab, eth_lab, ins_lab, sub_lab))))
+
+ggplot(plot_df, aes(group, pct)) +
+  geom_col(fill = "firebrick") +
+  geom_hline(yintercept = mean(df$DAYWAIT >= 2), linetype = "dashed") +
+  coord_flip() +
+  facet_wrap(~descriptor, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Share waiting 8+ days to enter treatment, by patient descriptor",
+       x = NULL, y = "% waiting 8+ days",
+       caption = "Dashed line = overall average") +
+  theme_minimal()
+```
+
+```{r}
+df %>%
+  transmute(
+    wait = factor(DAYWAIT, 0:4, c("0 days","1-7","8-14","15-30","31+")),
+    Age = as.character(factor(AGE, 1:12, age_lab)),
+    Insurance = as.character(factor(HLTHINS, 1:5, ins_lab)),
+    Substance = as.character(factor(SUB1, c(2,3,4,5,6,9), sub_lab))
+  ) %>%
+  pivot_longer(-wait, names_to = "descriptor", values_to = "group") %>%
+  filter(!is.na(group)) %>%
+  mutate(group = factor(group, levels = unique(c(age_lab, ins_lab, sub_lab)))) %>%
+  ggplot(aes(group, fill = wait)) +
+  geom_bar(position = "fill") +
+  coord_flip() +
+  facet_wrap(~descriptor, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "YlOrRd") +
+  labs(title = "Days waited by patient descriptor", x = NULL, y = "Share of patients", fill = "Days waited") +
+  theme_minimal()
+```
